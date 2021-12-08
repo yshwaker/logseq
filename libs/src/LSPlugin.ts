@@ -34,6 +34,7 @@ export type UIBaseOptions = {
   style?: CSS.Properties
   attrs?: Record<string, string>
   close?: 'outside' | string
+  reset?: boolean // reset slot content or not
 }
 
 export type UIPathIdentity = {
@@ -178,6 +179,50 @@ export type SimpleCommandCallback = (e: IHookEvent) => void
 export type BlockCommandCallback = (e: IHookEvent & { uuid: BlockUUID }) => Promise<void>
 export type BlockCursorPosition = { left: number, top: number, height: number, pos: number, rect: DOMRect }
 
+export type SimpleCommandKeybinding = {
+  mode?: 'global' | 'non-editing' | 'editing',
+  binding: string,
+  mac?: string // special for Mac OS
+}
+
+export type ExternalCommandType =
+  'logseq.command/run' |
+  'logseq.editor/cycle-todo' |
+  'logseq.editor/down' |
+  'logseq.editor/up' |
+  'logseq.editor/expand-block-children' |
+  'logseq.editor/collapse-block-children' |
+  'logseq.editor/open-file-in-default-app' |
+  'logseq.editor/open-file-in-directory' |
+  'logseq.editor/select-all-blocks' |
+  'logseq.editor/toggle-open-blocks' |
+  'logseq.editor/zoom-in' |
+  'logseq.editor/zoom-out' |
+  'logseq.go/home' |
+  'logseq.go/journals' |
+  'logseq.go/keyboard-shortcuts' |
+  'logseq.go/next-journal' |
+  'logseq.go/prev-journal' |
+  'logseq.go/search' |
+  'logseq.go/search-in-page' |
+  'logseq.go/tomorrow' |
+  'logseq.search/re-index' |
+  'logseq.sidebar/clear' |
+  'logseq.sidebar/open-today-page' |
+  'logseq.ui/goto-plugins' |
+  'logseq.ui/select-theme-color' |
+  'logseq.ui/toggle-brackets' |
+  'logseq.ui/toggle-cards' |
+  'logseq.ui/toggle-contents' |
+  'logseq.ui/toggle-document-mode' |
+  'logseq.ui/toggle-help' |
+  'logseq.ui/toggle-left-sidebar' |
+  'logseq.ui/toggle-right-sidebar' |
+  'logseq.ui/toggle-settings' |
+  'logseq.ui/toggle-theme' |
+  'logseq.ui/toggle-wide-mode' |
+  'logseq.command-palette/toggle'
+
 /**
  * App level APIs
  */
@@ -193,7 +238,8 @@ export interface IAppProxy {
       key: string,
       label: string,
       desc?: string,
-      palette?: boolean
+      palette?: boolean,
+      keybinding?: SimpleCommandKeybinding
     },
     action: SimpleCommandCallback) => void
 
@@ -201,8 +247,27 @@ export interface IAppProxy {
     opts: {
       key: string,
       label: string,
+      keybinding?: SimpleCommandKeybinding
     },
     action: SimpleCommandCallback) => void
+
+  invokeExternalCommand: (
+    type: ExternalCommandType,
+    ...args: Array<any>) => Promise<void>
+
+  /**
+   * Get state from app store
+   * valid state is here
+   * https://github.com/logseq/logseq/blob/master/src/main/frontend/state.cljs#L27
+   *
+   * @example
+   * ```ts
+   * const isDocMode = await logseq.App.getStateFromStore('document/mode?')
+   * ```
+   * @param path
+   */
+  getStateFromStore:
+    <T = any>(path: string | Array<string>) => Promise<T>
 
   // native
   relaunch: () => Promise<void>
@@ -217,10 +282,12 @@ export interface IAppProxy {
   replaceState: (k: string, params?: Record<string, any>, query?: Record<string, any>) => void
 
   // ui
-  queryElementById: (id: string) => string | boolean
+  queryElementById: (id: string) => Promise<string | boolean>
   showMsg: (content: string, status?: 'success' | 'warning' | 'error' | string) => void
   setZoomFactor: (factor: number) => void
   setFullScreen: (flag: boolean | 'toggle') => void
+  setLeftSidebarVisible: (flag: boolean | 'toggle') => void
+  setRightSidebarVisible: (flag: boolean | 'toggle') => void
 
   registerUIItem: (
     type: 'toolbar' | 'pagebar',
@@ -324,6 +391,8 @@ export interface IEditorProxy extends Record<string, any> {
 
   getCurrentBlock: () => Promise<BlockEntity | null>
 
+  getSelectedBlocks: () => Promise<Array<BlockEntity> | null>
+
   /**
    * get all blocks of the current page as a tree structure
    *
@@ -345,7 +414,7 @@ export interface IEditorProxy extends Record<string, any> {
   insertBlock: (
     srcBlock: BlockIdentity,
     content: string,
-    opts?: Partial<{ before: boolean; sibling: boolean; properties: {} }>
+    opts?: Partial<{ before: boolean; sibling: boolean; isPageBlock: boolean; properties: {} }>
   ) => Promise<BlockEntity | null>
 
   insertBatchBlock: (
@@ -368,6 +437,11 @@ export interface IEditorProxy extends Record<string, any> {
     srcBlock: BlockIdentity | EntityID,
     opts?: Partial<{ includeChildren: boolean }>
   ) => Promise<BlockEntity | null>
+
+  setBlockCollapsed: (
+    uuid: BlockUUID,
+    opts?: { flag: boolean | 'toggle' }
+  ) => Promise<void>
 
   getPage: (
     srcPage: PageIdentity | EntityID,
@@ -569,7 +643,7 @@ export interface ILSPluginUser extends EventEmitter<LSPluginUserEvents> {
   /**
    * show the plugin's UI
    */
-  showMainUI (): void
+  showMainUI (opts?: { autoFocus: boolean }): void
 
   /**
    * hide the plugin's UI

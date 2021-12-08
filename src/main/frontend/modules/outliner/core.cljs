@@ -2,6 +2,7 @@
   (:require [clojure.set :as set]
             [clojure.zip :as zip]
             [frontend.db :as db]
+            [frontend.db.model :as db-model]
             [frontend.db-schema :as db-schema]
             [frontend.db.conn :as conn]
             [frontend.db.outliner :as db-outliner]
@@ -59,15 +60,6 @@
      (outliner-state/get-by-parent-id repo [:block/uuid id])
      (mapv block))))
 
-(defn- update-block-unordered
-  [block]
-  (let [parent (:block/parent block)
-        page (:block/page block)
-        type (:block/type block)]
-    (if (and parent page type (= parent page) (= type :heading))
-      (assoc block :block/unordered false)
-      (assoc block :block/unordered true))))
-
 (defn- block-with-timestamps
   [block]
   (let [updated-at (util/time-ms)
@@ -81,6 +73,24 @@
         ;;                                      :updated-at (:block/updated-at block)})
         ]
     block))
+
+(defn- remove-orphaned-page-refs!
+  [db-id txs-state old-refs new-refs]
+  (when (not= old-refs new-refs)
+    (let [new-refs (set (map :block/name new-refs))
+          old-pages (->> (map :db/id old-refs)
+                         (db-model/get-entities-by-ids)
+                         (remove (fn [e] (contains? new-refs (:block/name e))))
+                         (map :block/name)
+                         (remove nil?))
+          orphaned-pages (db-model/get-orphaned-pages {:pages old-pages
+                                                       :empty-ref-f (fn [page]
+                                                                      (let [refs (:block/_refs page)]
+                                                                        (or (zero? (count refs))
+                                                                            (= #{db-id} (set (map :db/id refs))))))})]
+      (when (seq orphaned-pages)
+        (let [tx (mapv (fn [page] [:db/retractEntity (:db/id page)]) orphaned-pages)]
+          (swap! txs-state (fn [state] (vec (concat state tx)))))))))
 
 ;; -get-id, -get-parent-id, -get-left-id return block-id
 ;; the :block/parent, :block/left should be datascript lookup ref
@@ -136,13 +146,15 @@
   (-save [this txs-state]
     (assert (ds/outliner-txs-state? txs-state)
             "db should be satisfied outliner-tx-state?")
-    (let [this (block (update-block-unordered (:data this)))
-          m (-> (:data this)
+    (let [m (-> (:data this)
                 (dissoc :block/children :block/meta :block/top? :block/bottom?)
                 (util/remove-nils))
           m (if (state/enable-block-timestamps?) (block-with-timestamps m) m)
           other-tx (:db/other-tx m)
-          id (:db/id (:data this))]
+          id (:db/id (:data this))
+          block-entity (db/entity id)
+          old-refs (:block/refs block-entity)
+          new-refs (:block/refs m)]
       (when (seq other-tx)
         (swap! txs-state (fn [txs]
                            (vec (concat txs other-tx)))))
@@ -155,13 +167,14 @@
                                            [:db/retract id attribute])
                                       db-schema/retract-attributes)))))
 
-        (when-let [e (:block/page (db/entity id))]
+        (when-let [e (:block/page block-entity)]
           (let [m {:db/id (:db/id e)
                    :block/updated-at (util/time-ms)}
                 m (if (:block/created-at e)
                     m
                     (assoc m :block/created-at (util/time-ms)))]
-            (swap! txs-state conj m))))
+            (swap! txs-state conj m))
+          (remove-orphaned-page-refs! (:db/id block-entity) txs-state old-refs new-refs)))
 
       (swap! txs-state conj (dissoc m :db/other-tx))
 
@@ -575,7 +588,7 @@
              ;; direct outdenting (the old behavior)
              (let [right-siblings (get-right-siblings last-node)
                    right-siblings (doall
-                                   (map (fn [sibling right-siblings]
+                                   (map (fn [sibling]
                                           (some->
                                            (tree/-set-parent-id sibling last-node-id)
                                            (tree/-save txs-state)))
@@ -590,18 +603,21 @@
                              (tree/-save txs-state)))))))))))))
 
 (defn- set-nodes-page-aux
-  [node page txs-state]
-  (let [new-node (update node :data assoc :block/page page)]
+  [node page page-format txs-state]
+  (let [new-node (update node :data assoc
+                         :block/page page
+                         :block/format page-format)]
     (tree/-save new-node txs-state)
     (doseq [n (tree/-get-children new-node)]
-      (set-nodes-page-aux n page txs-state))))
+      (set-nodes-page-aux n page page-format txs-state))))
 
 (defn- set-nodes-page
   [node target-node txs-state]
   (let [page (or (get-in target-node [:data :block/page])
                  {:db/id (get-in target-node [:data :db/id])}) ; or page block
-        ]
-    (set-nodes-page-aux node page txs-state)))
+
+        page-format (:block/format (db/entity (or (:db/id page) page)))]
+    (set-nodes-page-aux node page page-format txs-state)))
 
 (defn move-subtree
   "Move subtree to a destination position in the relation tree.

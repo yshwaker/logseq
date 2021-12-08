@@ -3,6 +3,7 @@
             [frontend.date :as date]
             [frontend.db :as db]
             [frontend.handler.ui :as ui-handler]
+            [frontend.handler.recent :as recent-handler]
             [frontend.handler.search :as search-handler]
             [frontend.state :as state]
             [frontend.text :as text]
@@ -20,18 +21,24 @@
     (route-fn to path-params query-params)))
 
 (defn redirect-to-home!
-  []
-  (redirect! {:to :home}))
+  ([]
+   (redirect-to-home! true))
+  ([pub-event?]
+   (when pub-event? (state/pub-event! [:redirect-to-home]))
+   (redirect! {:to :home})))
 
 (defn redirect-to-page!
   ([page-name]
+   (recent-handler/add-page-to-recent! (state/get-current-repo) page-name)
    (redirect! {:to :page
                :path-params {:name (str page-name)}}))
   ([page-name anchor]
+   (recent-handler/add-page-to-recent! (state/get-current-repo) page-name)
    (redirect! {:to :page
                :path-params {:name (str page-name)}
                :query-params {:anchor anchor}}))
   ([page-name anchor push]
+   (recent-handler/add-page-to-recent! (state/get-current-repo) page-name)
    (redirect! {:to :page
                :path-params {:name (str page-name)}
                :query-params {:anchor anchor}
@@ -94,7 +101,8 @@
 (defn update-page-label!
   [route]
   (let [{:keys [data]} route]
-    (set! (. js/document.body.dataset -page) (name (:name data)))))
+    (when-let [data-name (:name data)]
+      (set! (. js/document.body.dataset -page) (name data-name)))))
 
 (defn jump-to-anchor!
   [anchor-text]

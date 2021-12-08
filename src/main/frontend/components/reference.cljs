@@ -74,9 +74,10 @@
                  filters (when page-name
                            (atom (page-handler/get-filters (string/lower-case page-name))))]
              (assoc state ::filters filters)))}
-  [state page-name marker? priority?]
+  [state page-name marker?]
   (when page-name
-    (let [repo (state/get-current-repo)
+    (let [page-name (string/lower-case page-name)
+          repo (state/get-current-repo)
           threshold (state/get-linked-references-collapsed-threshold)
           refed-blocks-ids (model-db/get-referenced-blocks-ids page-name)
           *n-ref (::n-ref state)
@@ -108,7 +109,7 @@
                                                 :editor-box editor/box}
                                                {})]
                 (content/content page-name {:hiccup ref-hiccup}))]
-             {}))
+             {:title-trigger? true}))
 
           (when (seq refed-blocks-ids)
             (ui/foldable
@@ -163,7 +164,8 @@
                     (content/content page-name
                                      {:hiccup ref-hiccup}))]))
 
-             {:default-collapsed? default-collapsed?}))]]))))
+             {:default-collapsed? default-collapsed?
+              :title-trigger? true}))]]))))
 
 (rum/defcs unlinked-references-aux
   < rum/reactive db-mixins/query
@@ -204,4 +206,5 @@
                                                   "s"))
               "Unlinked References")]
            (fn [] (unlinked-references-aux page-name n-ref))
-           {:default-collapsed? true})]]))))
+           {:default-collapsed? true
+            :title-trigger? true})]]))))

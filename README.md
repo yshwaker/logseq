@@ -112,16 +112,12 @@ Run ClojureScript tests
 yarn test
 ```
 
-Run Cypress tests
+Run E2E tests
 
 ``` bash
-yarn e2e-test
-```
-
-Run Clojure tests. (Note: `.cljc` files may be tested both by ClojureScript, and Clojure.)
-
-```bash
-clj -Mtest-clj
+yarn electron-watch
+# in another shell
+yarn e2e-test # or npx playwright test
 ```
 
 ## Desktop app development

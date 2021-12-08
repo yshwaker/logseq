@@ -129,7 +129,7 @@
                                      (swap! path-handles assoc path handle))))
              _ (state/set-loading-files! true)
              _ (when-not (state/home?)
-                 (route-handler/redirect-to-home!))
+                 (route-handler/redirect-to-home! false))
              root-handle (first result)
              dir-name (if nfs?
                         (gobj/get root-handle "name")
@@ -178,15 +178,17 @@
                              (and ok-handler (ok-handler))
                              (when (util/electron?)
                                (fs/watch-dir! dir-name))
-                             (state/pub-event! [:graph/added repo])))))
+                             (state/pub-event! [:graph/added repo])
+                             (db/persist! repo)))))
                (p/catch (fn [error]
                           (log/error :nfs/load-files-error repo)
                           (log/error :exception error)))))))
      (p/catch (fn [error]
+                (log/error :exception error)
                 (if (contains? #{"AbortError" "Error"} (gobj/get error "name"))
                   (state/set-loading-files! false)
                   ;; (log/error :nfs/open-dir-error error)
-                  (log/error :exception error)))))))
+                  ))))))
 
 (defn- compute-diffs
   [old-files new-files]
@@ -257,9 +259,12 @@
                                (rename-f "modify" modified))]
                     (when (or (and (seq diffs) (seq modified-files))
                               (seq diffs))
+                      (comment "re-index a local graph is handled here")
                       (repo-handler/load-repo-to-db! repo
                                                      {:diffs     diffs
                                                       :nfs-files modified-files
+                                                      ;; re-ask encryption
+                                                      :first-clone? re-index?
                                                       :refresh? (not re-index?)}))
                     (when (and (util/electron?) (not re-index?))
                       (db/transact! repo new-files))))))))

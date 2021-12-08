@@ -135,7 +135,6 @@
   [repo-url file content]
   (let [electron-local-repo? (and (util/electron?)
                                   (config/local-db? repo-url))
-        ;; FIXME: store relative path in db
         file (cond
                (and electron-local-repo?
                     util/win32?
@@ -145,6 +144,9 @@
                (and electron-local-repo? (or
                                           util/win32?
                                           (not= "/" (first file))))
+               (str (config/get-repo-dir repo-url) "/" file)
+
+               (and (mobile/is-native-platform?) (not= "/" (first file)))
                (str (config/get-repo-dir repo-url) "/" file)
 
                :else
@@ -158,7 +160,12 @@
                    (p/let [delete-blocks (db/delete-file-blocks! repo-url file)
                            [pages blocks] (extract-handler/extract-blocks-pages repo-url file content utf8-content)
                            _ (when-let [current-file (page-exists-in-another-file (first pages) file)]
-                               (p/rejected (str "Page already exists with another file: " current-file)))
+                               (when (not= file current-file)
+                                 (let [error (str "Page already exists with another file: " current-file ", current file: " file)]
+                                   (state/pub-event! [:notification/show
+                                                      {:content error
+                                                       :status :error
+                                                       :clear? false}]))))
                            blocks (remove-non-exists-refs! blocks)
                            block-ids (map (fn [block] {:block/uuid (:block/uuid block)}) blocks)
                            pages (extract-handler/with-ref-pages pages blocks)]
@@ -323,14 +330,11 @@
       (recur))
     chan))
 
-(defn watch-for-local-dirs!
+(defn watch-for-current-graph-dir!
   []
   (when (or (util/electron?) (mobile/is-native-platform?))
-    (let [repos (->> (state/get-repos)
-                     (filter (fn [repo]
-                               (config/local-db? (:url repo)))))
-          directories (map (fn [repo] (config/get-repo-dir (:url repo))) repos)]
-      (doseq [dir directories]
+    (when-let [repo (state/get-current-repo)]
+      (when-let [dir (config/get-repo-dir repo)]
         (fs/watch-dir! dir)))))
 
 (defn create-metadata-file

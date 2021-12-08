@@ -48,6 +48,7 @@
 
 
 (defn listen-file-changes []
+  (js/alert "listen-file-changes")
   (js/console.log "#register-mobile-file-watcher-listener")
 
   (.addListener mobile-util/file-watcher

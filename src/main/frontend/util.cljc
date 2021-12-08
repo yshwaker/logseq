@@ -193,7 +193,7 @@
 
 (defn ext-of-image? [s]
   (some #(string/ends-with? s %)
-        [".png" ".jpg" ".jpeg" ".bmp" ".gif" ".webp"]))
+        [".png" ".jpg" ".jpeg" ".bmp" ".gif" ".webp" ".svg"]))
 
 ;; ".lg:absolute.lg:inset-y-0.lg:right-0.lg:w-1/2"
 (defn hiccup->class
@@ -621,11 +621,27 @@
          (str prefix new-value)))
      s)))
 
-(defn replace-ignore-case [s old-value new-value]
-  (string/replace s (re-pattern (str "(?i)" old-value)) new-value))
+(defonce default-escape-chars "[]{}().+*?|")
 
-(defn replace-first-ignore-case [s old-value new-value]
-  (string/replace-first s (re-pattern (str "(?i)" old-value)) new-value))
+(defn replace-ignore-case
+  [s old-value new-value & [escape-chars]]
+  (let [escape-chars (or escape-chars default-escape-chars)
+        old-value (if (string? escape-chars)
+                    (reduce (fn [acc escape-char]
+                              (string/replace acc escape-char (str "\\" escape-char)))
+                            old-value escape-chars)
+                    old-value)]
+    (string/replace s (re-pattern (str "(?i)" old-value)) new-value)))
+
+(defn replace-first-ignore-case
+  [s old-value new-value & [escape-chars]]
+  (let [escape-chars (or escape-chars default-escape-chars)
+        old-value (if (string? escape-chars)
+                    (reduce (fn [acc escape-char]
+                              (string/replace acc escape-char (str "\\" escape-char)))
+                            old-value escape-chars)
+                    old-value)]
+    (string/replace-first s (re-pattern (str "(?i)" old-value)) new-value)))
 
 ;; copy from https://stackoverflow.com/questions/18735665/how-can-i-get-the-positions-of-regex-matches-in-clojurescript
 #?(:cljs
@@ -762,6 +778,11 @@
    (defn get-blocks-noncollapse []
      (->> (d/by-class "ls-block")
           (filter (fn [b] (some? (gobj/get b "offsetParent")))))))
+
+#?(:cljs
+   (defn remove-embeded-blocks [blocks]
+     (->> blocks
+          (remove (fn [b] (= "true" (d/attr b "data-embed")))))))
 
 ;; Take the idea from https://stackoverflow.com/questions/4220478/get-all-dom-block-elements-for-selected-texts.
 ;; FIXME: Note that it might not works for IE.
@@ -917,7 +938,17 @@
        (when-let [index (.indexOf blocks block)]
          (let [idx (dec index)]
            (when (>= idx 0)
-             (nth blocks idx)))))))
+             (nth-safe blocks idx)))))))
+
+#?(:cljs
+   (defn get-prev-block-non-collapsed-non-embed
+     [block]
+     (when-let [blocks (->> (get-blocks-noncollapse)
+                            remove-embeded-blocks)]
+       (when-let [index (.indexOf blocks block)]
+         (let [idx (dec index)]
+           (when (>= idx 0)
+             (nth-safe blocks idx)))))))
 
 #?(:cljs
    (defn get-next-block-non-collapsed
@@ -977,7 +1008,7 @@
     (url-encode s)))
 
 #?(:cljs
-   (defn- get-clipboard-as-html
+   (defn get-clipboard-as-html
      [event]
      (if-let [c (gobj/get event "clipboardData")]
        [(.getData c "text/html") (.getData c "text")]
@@ -1115,11 +1146,14 @@
 
 (defn ->platform-shortcut
   [keyboard-shortcut]
-  (if mac?
-    (-> keyboard-shortcut
-        (string/replace "Ctrl" "Cmd")
-        (string/replace "Alt" "Opt"))
-    keyboard-shortcut))
+  (let [result (or keyboard-shortcut "")
+        result (string/replace result "left" "←")
+        result (string/replace result "right" "→")]
+    (if mac?
+      (-> result
+          (string/replace "Ctrl" "Cmd")
+          (string/replace "Alt" "Opt"))
+      result)))
 
 (defn remove-common-preceding
   [col1 col2]
@@ -1419,3 +1453,27 @@
            button (gobj/get e "button")]
        (or (= which 3)
            (= button 2)))))
+
+#?(:cljs
+   (defn url?
+     [s]
+     (and (string? s)
+          (try
+            (js/URL. s)
+            true
+            (catch js/Error _e
+              false)))))
+
+#?(:cljs
+   (defn make-el-into-viewport
+     [^js/HTMLElement el offset]
+     (let [wrap-height (.-clientHeight js/document.documentElement)
+           target-bottom (.-bottom (.getBoundingClientRect el))]
+       (when (> (+ target-bottom (or (safe-parse-int offset) 0))
+                wrap-height)
+         (.scrollIntoView el #js {:block "center" :behavior "smooth"})))))
+
+#?(:cljs
+   (defn sm-breakpoint?
+     []
+     (< (.-offsetWidth js/document.documentElement) 640)))

@@ -186,11 +186,11 @@
 
 (rum/defcs page-title <
   (rum/local false ::edit?)
-  (rum/local "" ::title-value)
+  {:init (fn [state]
+           (assoc state ::title-value (atom (nth (:rum/args state) 2))))}
   [state page-name icon title format fmt-journal?]
   (when title
     (let [*title-value (get state ::title-value)
-          *input-ref (rum/create-ref)
           *edit? (get state ::edit?)
           repo (state/get-current-repo)
           title-element (if (and (string/includes? title "[[")
@@ -209,24 +209,33 @@
                   (pdf-assets/human-hls-filename-display title)
                   (if fmt-journal? (date/journal-title->custom-format title) title))
           old-name (or title page-name)
-          new-page-exist? (when @*title-value
-                            (db/entity [:block/name @*title-value]))
-          confirm-fn (ui/make-confirm-modal
-                      {:title         "Do you really want to change the page name?"
-                       :on-confirm    (fn [_e {:keys [close-fn]}]
-                                        (close-fn)
-                                        (page-handler/rename! (or title page-name) @*title-value)
-                                        (reset! *edit? false)
-                                        (reset! *title-value ""))
-                       :on-cancel     (fn []
-                                        (set! (.-value (rum/deref *input-ref)) old-name)
-                                        (reset! *edit? true)
-                                        (reset! *title-value ""))})]
+          confirm-fn (fn []
+                       (let [merge? (and (not= (string/lower-case page-name) (string/lower-case @*title-value))
+                                         (page-handler/page-exists? page-name)
+                                         (page-handler/page-exists? @*title-value))]
+                         (ui/make-confirm-modal
+                          {:title         (if merge?
+                                            (str "Page \"" @*title-value "\" already exists, merge them?")
+                                            "Do you really want to change the page name?")
+                           :on-confirm    (fn [_e {:keys [close-fn]}]
+                                            (close-fn)
+                                            (page-handler/rename! (or title page-name) @*title-value)
+                                            (reset! *edit? false))
+                           :on-cancel     (fn []
+                                            (reset! *title-value old-name)
+                                            (reset! *edit? true))})))
+          blur-fn (fn [e]
+                    (cond
+                      (= old-name @*title-value)
+                      nil
+
+                      :else
+                      (state/set-modal! (confirm-fn)))
+                    (util/stop e))]
       (if @*edit?
         [:h1.title {:style {:margin-left -2}}
          [:input.w-full
           {:type          "text"
-           :ref           *input-ref
            :auto-focus    true
            :style         {:outline "none"
                            :font-weight 600}
@@ -236,19 +245,10 @@
                             (let [value (util/evalue e)]
                               (when-not (string/blank? value)
                                 (reset! *title-value (string/trim value)))))
-           :on-blur       (fn [e]
-                            (if-not new-page-exist?
-                              (when (not= old-name @*title-value)
-                                (state/set-modal! confirm-fn))
-                             (notification/show! "Page already exists!" :error))
-                            (util/stop e))
+           :on-blur       blur-fn
            :on-key-down   (fn [e]
                             (when (= (gobj/get e "key") "Enter")
-                              (if-not new-page-exist?
-                                (when (not= old-name @*title-value)
-                                  (state/set-modal! confirm-fn))
-                                (notification/show! "Page already exists!" :error))
-                              (util/stop e)))}]]
+                              (blur-fn e)))}]]
         [:a.page-title {:on-mouse-down (fn [e]
                                          (when (util/right-click? e)
                                            (state/set-state! :page-title/context {:page page-name})))
@@ -295,10 +295,10 @@
                          (let [m (format-block/page-name->map path-page-name true)]
                            (db/transact! repo [m])))
                        (db/pull [:block/name page-name])))
-              {:keys [title icon] :as properties} (:block/properties page)
+              {:keys [icon] :as properties} (:block/properties page)
               page-name (:block/name page)
               page-original-name (:block/original-name page)
-              title (or title page-original-name page-name)
+              title (or page-original-name page-name)
               icon (or icon "")
               today? (and
                       journal?
@@ -443,7 +443,7 @@
                 ;;      (set-setting! :layout value))
                 ;;    "graph-layout")]
                 [:div.flex.items-center.justify-between.mb-2
-                 [:span "Journals"]
+                 [:span (t :right-side-bar/journals)]
                  ;; FIXME: why it's not aligned well?
                  [:div.mt-1
                   (ui/toggle journal?
@@ -485,7 +485,8 @@
                                                         (reset! *focus-nodes [])
                                                         (reset! *n-hops nil)
                                                         (state/clear-search-filters!))}
-                 "Reset Graph"]]])))
+                 "Reset Graph"]]]))
+           {})
           (graph-filter-section
            [:span.font-medium "Search"]
            (fn [open?]
@@ -747,8 +748,7 @@
 
         search-key (fn [key]
                      (when-let [key (and key (string/trim key))]
-                       (if (and (> (count key) 2)
-                                (not (string/blank? key))
+                       (if (and (not (string/blank? key))
                                 (seq @*results))
                          (reset! *search-key key)
                          (reset! *search-key nil))))
@@ -842,16 +842,21 @@
                    (ui/icon "x")])])]]
 
            [:div.r.flex.items-center.justify-between
-            [:a.ml-1.pr-2.opacity-70.hover:opacity-100
-             {:on-click (fn [] (state/set-modal!
-                                (batch-delete-dialog
-                                 (model/get-orphaned-pages (state/get-current-repo)) true
-                                 #(do
-                                    (reset! *checks nil)
-                                    (refresh-pages)))))}
-             [:span
-              (ui/icon "file-x")
-              [:span.ml-1 (t :remove-orphaned-pages)]]]
+            (let [orphaned-pages (model/get-orphaned-pages {})
+                  orphaned-pages? (seq orphaned-pages)]
+              [:a.ml-1.pr-2.opacity-70.hover:opacity-100
+               {:on-click (fn []
+                            (if orphaned-pages?
+                              (state/set-modal!
+                               (batch-delete-dialog
+                                orphaned-pages  true
+                                #(do
+                                   (reset! *checks nil)
+                                   (refresh-pages))))
+                              (notification/show! "Congratulations, no orphaned pages in your graph!" :success)))}
+               [:span
+                (ui/icon "file-x")
+                [:span.ml-1 (t :remove-orphaned-pages)]]])
 
             [:a.ml-1.pr-2.opacity-70.hover:opacity-100 {:href (rfe/href :all-files)}
              [:span
@@ -898,35 +903,36 @@
 
            [:tbody
             (for [{:block/keys [idx name created-at updated-at backlinks] :as page} @*results]
-              [:tr {:key name}
-               [:td.selector
-                (checkbox-opt (str "label-" idx)
-                              (get @*checks idx)
-                              {:on-change (fn []
-                                            (swap! *checks update idx not))})]
+              (when-not (string/blank? name)
+                [:tr {:key name}
+                 [:td.selector
+                  (checkbox-opt (str "label-" idx)
+                                (get @*checks idx)
+                                {:on-change (fn []
+                                              (swap! *checks update idx not))})]
 
-               [:td.name [:a {:on-click (fn [e]
-                                          (let [repo (state/get-current-repo)]
-                                            (when (gobj/get e "shiftKey")
-                                              (state/sidebar-add-block!
-                                               repo
-                                               (:db/id page)
-                                               :page
-                                               {:page (:block/name page)}))))
-                              :href     (rfe/href :page {:name (:block/name page)})}
-                          (block/page-cp {} page)]]
+                 [:td.name [:a {:on-click (fn [e]
+                                            (let [repo (state/get-current-repo)]
+                                              (when (gobj/get e "shiftKey")
+                                                (state/sidebar-add-block!
+                                                 repo
+                                                 (:db/id page)
+                                                 :page
+                                                 {:page (:block/name page)}))))
+                                :href     (rfe/href :page {:name (:block/name page)})}
+                            (block/page-cp {} page)]]
 
-               (when-not mobile?
-                 [:td.backlinks [:span backlinks]])
+                 (when-not mobile?
+                   [:td.backlinks [:span backlinks]])
 
-               (when-not mobile?
-                 [:td.created-at [:span (if created-at
-                                          (date/int->local-time-2 created-at)
-                                          "Unknown")]])
-               (when-not mobile?
-                 [:td.updated-at [:span (if updated-at
-                                          (date/int->local-time-2 updated-at)
-                                          "Unknown")]])])]]
+                 (when-not mobile?
+                   [:td.created-at [:span (if created-at
+                                            (date/int->local-time-2 created-at)
+                                            "Unknown")]])
+                 (when-not mobile?
+                   [:td.updated-at [:span (if updated-at
+                                            (date/int->local-time-2 updated-at)
+                                            "Unknown")]])]))]]
 
           [:div.paginates
            [:span]

@@ -11,4 +11,10 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(FolderPicker.class);
         registerPlugin(FileWatcher.class);
     }
+
+    @Override
+    public void onPause() {
+        overridePendingTransition(0, R.anim.byebye);
+        super.onPause();
+    }
 }

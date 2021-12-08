@@ -416,6 +416,16 @@
 (def review-finished
   [:p.p-2 "Congrats, you've reviewed all the cards for this query, see you next time! 💯"])
 
+(defn btn-with-shortcut [{:keys [shortcut id btn-text background on-click]}]
+  (ui/tippy
+   {:html  [:div.text-sm.font-medium shortcut]
+    :delay 200
+    :theme "monospace"}
+   (ui/button btn-text
+              :id id
+              :background background
+              :on-click on-click)))
+
 (rum/defcs view
   < rum/reactive
   (rum/local 1 ::phase)
@@ -455,17 +465,18 @@
          (if (or preview? modal?)
            [:div.flex.my-4.justify-between
             [:div.flex-1
-             (when-not (and (not preview?) (= next-phase 1))
-               (ui/button (case next-phase
-                            1 [:span "Hide answers " (ui/keyboard-shortcut [:s])]
-                            2 [:span "Show answers " (ui/keyboard-shortcut [:s])]
-                            3 [:span "Show clozes " (ui/keyboard-shortcut [:s])])
-                          :id "card-answers"
-                          :class "mr-2"
-                 :on-click #(reset! phase next-phase)))
+              (when-not (and (not preview?) (= next-phase 1))
+                [:div.flex.flex-row.justify-between
+                 (btn-with-shortcut {:btn-text (case next-phase
+                                                 1 "Hide answers"
+                                                 2 "Show answers"
+                                                 3 "Show clozes")
+                                     :shortcut "s"
+                                     :id       "card-answers"
+                                     :on-click #(reset! phase next-phase)})])
 
              (when (and (> (count cards) 1) preview?)
-               (ui/button [:span "Next " (ui/keyboard-shortcut [:n])]
+               (ui/button [:span "Next " (ui/render-keyboard-shortcut [:n])]
                           :id "card-next"
                           :class "mr-2"
                  :on-click #(skip-card card card-index cards phase review-records cb)))
@@ -475,26 +486,25 @@
                      interval-days-score-4 (get (get-next-interval card 5) card-last-interval-property)
                      interval-days-score-5 (get (get-next-interval card 5) card-last-interval-property)]
                  [:div.flex.flex-row.justify-between
-                  (ui/button (if (util/mobile?)
-                               "Forgotten"
-                               [:span "Forgotten " (ui/keyboard-shortcut [:f])])
-                    :id "card-forgotten"
-                    :on-click (fn []
-                                (score-and-next-card 1 card card-index cards phase review-records cb)
-                                (let [tomorrow (tc/to-string (t/plus (t/today) (t/days 1)))]
-                                  (editor-handler/set-block-property! root-block-id card-next-schedule-property tomorrow))))
+                  (btn-with-shortcut {:btn-text   "Forgotten"
+                                      :shortcut   "f"
+                                      :id         "card-forgotten"
+                                      :background "red"
+                                      :on-click   (fn []
+                                                    (score-and-next-card 1 card card-index cards phase review-records cb)
+                                                    (let [tomorrow (tc/to-string (t/plus (t/today) (t/days 1)))]
+                                                      (editor-handler/set-block-property! root-block-id card-next-schedule-property tomorrow)))})
 
-                  (ui/button (if (util/mobile?)
-                                 "Remembered"
-                                 [:span "Remembered " (ui/keyboard-shortcut [:r])])
-                    :id "card-remembered"
-                    :on-click #(score-and-next-card 5 card card-index cards phase review-records cb))
+                  (btn-with-shortcut {:btn-text (if (util/mobile?) "Hard" "Took a while to recall")
+                                      :shortcut "t"
+                                      :id       "card-recall"
+                                      :on-click #(score-and-next-card 3 card card-index cards phase review-records cb)})
 
-                  (ui/button (if (util/mobile?)
-                               "Hard"
-                               [:span "Took a while to recall " (ui/keyboard-shortcut [:t])])
-                    :id "card-recall"
-                    :on-click #(score-and-next-card 3 card card-index cards phase review-records cb))]))]
+                  (btn-with-shortcut {:btn-text   "Remembered"
+                                      :shortcut   "r"
+                                      :id         "card-remembered"
+                                      :background "green"
+                                      :on-click   #(score-and-next-card 5 card card-index cards phase review-records cb)})]))]
 
             (when preview?
               (ui/tippy {:html [:div.text-sm
@@ -571,7 +581,8 @@
   (let [repo (state/get-current-repo)
         query-string (:query-string state)
         card-index (::card-index state)
-        query-result (:query-result state)]
+        query-result (:query-result state)
+        global? (:global? config)]
     (if (seq query-result)
       (let [{:keys [total result]} (query-scheduled repo query-result (tl/local-now))
             review-cards result
@@ -580,7 +591,7 @@
             filtered-total (count result)
             modal? (:modal? config)]
         [:div.flex-1.cards-review {:style (when modal? {:height "100%"})
-                                   :class (if (:global? config) "" "shadow-xl")}
+                                   :class (if global? "" "shadow-xl")}
          [:div.flex.flex-row.items-center.justify-between.cards-title
           [:div.flex.flex-row.items-center
            (ui/icon "infinity" {:style {:font-size 20}})
@@ -638,10 +649,9 @@
                                  (persist-var/persist-save of-matrix))})
                        card-index))]
            review-finished)])
-
-      (if (zero? @cards-total)
+      (if global?
         [:div.ls-card
-         [:h1.title "Time to create your first card!"]
+         [:h1.title "Time to create a card!"]
 
          [:div
           [:p "You can add \"#card\" to any block to turn it into a card or trigger \"/cloze\" to add some clozes."]
