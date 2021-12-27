@@ -73,6 +73,7 @@ function getDefaultStore() {
     return store;
 }
 function get(key, store = getDefaultStore()) {
+    key = key.normalize("NFKC");
     let req;
     return store._withIDBStore('readwrite', store => {
         req = store.get(key);
@@ -80,6 +81,7 @@ function get(key, store = getDefaultStore()) {
 }
 const setBatchers = {};
 function set(key, value, store = getDefaultStore()) {
+    key = key.normalize("NFKC");
     if (!setBatchers[store.id]) {
         setBatchers[store.id] = new Batcher((items) => store._withIDBStore('readwrite', store => {
             for (const item of items) {
@@ -97,6 +99,7 @@ function setBatch(items, store = getDefaultStore()) {
   });
 }
 function update(key, updater, store = getDefaultStore()) {
+    key = key.normalize("NFKC");
     return store._withIDBStore('readwrite', store => {
         const req = store.get(key);
         req.onsuccess = () => {
@@ -105,6 +108,7 @@ function update(key, updater, store = getDefaultStore()) {
     });
 }
 function del(key, store = getDefaultStore()) {
+    key = key.normalize("NFKC");
     return store._withIDBStore('readwrite', store => {
         store.delete(key);
     });
