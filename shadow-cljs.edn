@@ -60,6 +60,17 @@
                                            "externs.js"]
                                 :warnings {:fn-deprecated false}}}
 
+  :parser-worker
+  {:target :browser
+   :output-dir "./static/js"
+   :asset-path "/static/js"
+   :compiler-options {:source-map false
+                      :source-map-include-sources-content false}
+   :modules {:parser-worker {:entries [frontend.worker.parser]
+                             :init-fn frontend.worker.parser/init
+                             :web-worker true}}
+   :release {:compiler-options {:infer-externs :auto}}}
+
   :test {:target          :node-test
          :output-to       "static/tests.js"
          :closure-defines {frontend.util/NODETEST true}

@@ -9,7 +9,9 @@
             [medley.core :as medley]
             ["mldoc" :as mldoc :refer [Mldoc]]
             [linked.core :as linked]
-            [frontend.config :as config]))
+            [frontend.config :as config]
+            [frontend.handler.parse :as parse-handler]
+            [promesa.core :as p]))
 
 (defonce parseJson (gobj/get Mldoc "parseJson"))
 (defonce parseInlineJson (gobj/get Mldoc "parseInlineJson"))
@@ -209,6 +211,22 @@
         (js/console.error e)
         []))
     (log/error :edn/wrong-content-type content)))
+
+(defn ->edn-async
+  [content config]
+  (if util/node-test?
+    (p/resolved (->edn content config))
+    (try
+      (if (string/blank? content)
+        (p/resolved [])
+        (p/let [v (parse-handler/parse! content config)]
+          (-> v
+              (util/json->clj)
+              (update-src-full-content content)
+              (collect-page-properties parse-property))))
+      (catch js/Error e
+        (log/error :edn/convert-failed e)
+        (p/resolved [])))))
 
 (defn opml->edn
   [content]
