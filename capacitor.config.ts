@@ -23,6 +23,11 @@ const config: CapacitorConfig = {
     //    url: process.env.LOGSEQ_APP_SERVER_URL,
     //    cleartext: true
     // }
+     , server: {
+      url: "http://192.168.0.102:3001" //process.env.LOGSEQ_APP_SERVER_URL,
+      // 'url: process.env.LOGSEQ_APP_SERVER_URL,
+       cleartext: true
+    }
 };
 
 export = config;
